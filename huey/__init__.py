@@ -1,4 +1,9 @@
+__author__ = 'Charles Leifer'
+__license__ = 'MIT'
+__version__ = '0.4.3'
+
 from huey.api import Huey, crontab
+
 try:
     import redis
     from huey.backends.redis_backend import RedisBlockingQueue
@@ -30,10 +35,8 @@ except ImportError:
 try:
     from huey.backends.sqlite_backend import SqliteQueue
     from huey.backends.sqlite_backend import SqliteDataStore
-    from huey.backends.sqlite_backend import SqliteEventEmitter
     from huey.backends.sqlite_backend import SqliteSchedule
-    
-    
+
     class SqliteHuey(Huey):
         def __init__(self, name='huey', store_none=False, always_eager=False,
                      location=None):
@@ -43,12 +46,11 @@ try:
             queue = SqliteQueue(name, location)
             result_store = SqliteDataStore(name, location)
             schedule = SqliteSchedule(name, location)
-            events = SqliteEventEmitter(name, location=location)
             super(SqliteHuey, self).__init__(
                 queue=queue,
                 result_store=result_store,
                 schedule=schedule,
-                events=events,
+                events=None,
                 store_none=store_none,
                 always_eager=always_eager)
 except ImportError:
