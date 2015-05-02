@@ -2,6 +2,7 @@ import datetime
 import unittest
 
 from huey import crontab
+from huey import exceptions as huey_exceptions
 from huey import Huey
 from huey.api import QueueTask
 from huey.backends.dummy import DummyDataStore
@@ -26,11 +27,16 @@ res_huey_nones = Huey(res_queue, res_store, store_none=True)
 
 # store some global state
 state = {}
+last_executed_task_class = []
 
 # create a decorated queue command
 @huey.task()
 def add(key, value):
     state[key] = value
+
+@huey.task(include_task=True)
+def self_aware(key, value, task=None):
+    last_executed_task_class.append(task.__class__.__name__)
 
 # create a periodic queue command
 @huey.periodic_task(crontab(minute='0'))
@@ -71,10 +77,12 @@ def returns_none2():
 class HueyTestCase(unittest.TestCase):
     def setUp(self):
         global state
+        global last_executed_task_class
         queue.flush()
         res_queue.flush()
         schedule.flush()
         state = {}
+        last_executed_task_class = []
 
     def test_registration(self):
         self.assertTrue('queuecmd_add' in registry)
@@ -140,6 +148,65 @@ class HueyTestCase(unittest.TestCase):
         # error
         self.assertRaises(BampfException, huey.execute, task)
 
+    def test_internal_error(self):
+        """
+        Verify that exceptions are wrapped with the special "huey"
+        exception classes.
+        """
+        class SpecialException(Exception):
+            pass
+
+        class BrokenQueue(DummyQueue):
+            def read(self):
+                raise SpecialException('read error')
+
+            def write(self, data):
+                raise SpecialException('write error')
+
+        class BrokenDataStore(DummyDataStore):
+            def get(self, key):
+                raise SpecialException('get error')
+
+            def put(self, key, value):
+                raise SpecialException('put error')
+
+        class BrokenSchedule(DummySchedule):
+            def add(self, data, ts):
+                raise SpecialException('add error')
+
+            def read(self, ts):
+                raise SpecialException('read error')
+
+        task = AddTask()
+        huey = Huey(
+            BrokenQueue('q'),
+            BrokenDataStore('q'),
+            BrokenSchedule('q'))
+
+        self.assertRaises(
+            huey_exceptions.QueueWriteException,
+            huey.enqueue,
+            AddTask())
+        self.assertRaises(
+            huey_exceptions.QueueReadException,
+            huey.dequeue)
+        self.assertRaises(
+            huey_exceptions.DataStorePutException,
+            huey.revoke,
+            task)
+        self.assertRaises(
+            huey_exceptions.DataStoreGetException,
+            huey.restore,
+            task)
+        self.assertRaises(
+            huey_exceptions.ScheduleAddException,
+            huey.add_schedule,
+            task)
+        self.assertRaises(
+            huey_exceptions.ScheduleReadException,
+            huey.read_schedule,
+            1)
+
     def test_dequeueing(self):
         res = huey.dequeue() # no error raised if queue is empty
         self.assertEqual(res, None)
@@ -167,6 +234,21 @@ class HueyTestCase(unittest.TestCase):
         self.assertEqual(state['k'], 'X')
 
         self.assertRaises(TypeError, huey.execute, huey.dequeue())
+
+    def test_self_awareness(self):
+        self_aware('k', 'v')
+        task = huey.dequeue()
+        huey.execute(task)
+        self.assertEqual(last_executed_task_class.pop(), "queuecmd_self_aware")
+
+        self_aware('k', 'v')
+        huey.execute(huey.dequeue())
+        self.assertEqual(last_executed_task_class.pop(), "queuecmd_self_aware")
+
+        add('k', 'x')
+        huey.execute(huey.dequeue())
+        self.assertEqual(len(last_executed_task_class), 0)
+
 
     def test_revoke(self):
         ac = AddTask(('k', 'v'))

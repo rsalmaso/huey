@@ -8,10 +8,14 @@ from functools import wraps
 import sys
 
 from django.conf import settings
+<<<<<<< HEAD
 try:
     from django.db import close_old_connections
 except ImportError:
     from django.db import close_connection as close_old_connections
+=======
+from django.db import connection
+>>>>>>> master
 
 from huey import crontab
 from huey import Huey
@@ -108,7 +112,11 @@ def close_db(fn):
         try:
             return fn(*args, **kwargs)
         finally:
+<<<<<<< HEAD
             close_old_connections()
+=======
+            connection.close()
+>>>>>>> master
     return inner
 
 def db_task(*args, **kwargs):
